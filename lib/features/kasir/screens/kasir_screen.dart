@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:kelontongku/features/kasir/widgets/payment_bottom_sheet.dart';
 import 'package:kelontongku/features/pengaturan/screens/settings_screen.dart';
+import 'package:kelontongku/features/stok/models/product_model.dart';
+import 'package:kelontongku/features/stok/services/product_service.dart';
 
 class _CartItem {
+  final int? productId;
   final String name;
   final int unitPrice;
   int quantity;
 
   _CartItem({
+    this.productId,
     required this.name,
     required this.unitPrice,
     required this.quantity,
@@ -25,6 +29,10 @@ class KasirScreen extends StatefulWidget {
 
 class _KasirScreenState extends State<KasirScreen> {
   final _searchController = TextEditingController();
+  final _productService = ProductService();
+
+  List<ProductModel> _catalogProducts = [];
+  bool _isSearchingProducts = false;
 
   final List<_CartItem> _cartItems = [
     _CartItem(name: 'Beras 5kg', unitPrice: 65000, quantity: 1),
@@ -33,9 +41,68 @@ class _KasirScreenState extends State<KasirScreen> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _loadCatalog();
+  }
+
+  @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadCatalog() async {
+    setState(() => _isSearchingProducts = true);
+    try {
+      final items = await _productService.fetchProducts();
+      if (!mounted) return;
+      setState(() {
+        _catalogProducts = items;
+        _isSearchingProducts = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isSearchingProducts = false);
+    }
+  }
+
+  List<ProductModel> get _matchingProducts {
+    final query = _searchController.text.trim().toLowerCase();
+    if (query.isEmpty) return const [];
+    return _catalogProducts
+        .where((p) => p.namaBarang.toLowerCase().contains(query))
+        .toList();
+  }
+
+  void _addProductToCart(ProductModel product) {
+    setState(() {
+      final existingIndex = _cartItems.indexWhere(
+        (item) =>
+            (item.productId != null && item.productId == product.id) ||
+            item.name.toLowerCase() == product.namaBarang.toLowerCase(),
+      );
+      if (existingIndex != -1) {
+        _cartItems[existingIndex].quantity++;
+      } else {
+        _cartItems.add(
+          _CartItem(
+            productId: product.id,
+            name: product.namaBarang,
+            unitPrice: product.hargaJual,
+            quantity: 1,
+          ),
+        );
+      }
+      _searchController.clear();
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${product.namaBarang} ditambahkan ke keranjang'),
+        backgroundColor: const Color(0xFF1B5E20),
+        duration: const Duration(seconds: 1),
+      ),
+    );
   }
 
   int get _totalAmount =>
@@ -64,6 +131,9 @@ class _KasirScreenState extends State<KasirScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final searchQuery = _searchController.text.trim();
+    final searchResults = _matchingProducts;
+
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
       body: SafeArea(
@@ -219,23 +289,33 @@ class _KasirScreenState extends State<KasirScreen> {
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(color: const Color(0xFF1B5E20)),
                           ),
-                          // child: const Icon(
-                          //   Icons.qr_code_scanner,
-                          //   color: Color(0xFF1B5E20),
-                          //   size: 24,
-                          // ),
+                          child: const Icon(
+                            Icons.qr_code_scanner,
+                            color: Color(0xFF1B5E20),
+                            size: 24,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: TextField(
                           controller: _searchController,
+                          onChanged: (_) => setState(() {}),
                           decoration: InputDecoration(
                             hintText: 'Cari nama barang...',
                             hintStyle: const TextStyle(
                               color: Color(0xFF69736D),
                               fontSize: 15,
                             ),
+                            suffixIcon: searchQuery.isNotEmpty
+                                ? IconButton(
+                                    onPressed: () {
+                                      _searchController.clear();
+                                      setState(() {});
+                                    },
+                                    icon: const Icon(Icons.close, size: 20),
+                                  )
+                                : null,
                             filled: true,
                             fillColor: Colors.white,
                             contentPadding: const EdgeInsets.symmetric(
@@ -260,7 +340,7 @@ class _KasirScreenState extends State<KasirScreen> {
                       ),
                       const SizedBox(width: 8),
                       InkWell(
-                        onTap: () {},
+                        onTap: _loadCatalog,
                         borderRadius: BorderRadius.circular(12),
                         child: Container(
                           width: 48,
@@ -269,15 +349,77 @@ class _KasirScreenState extends State<KasirScreen> {
                             color: const Color(0xFF1B5E20),
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: const Icon(
-                            Icons.search,
-                            color: Colors.white,
-                            size: 24,
-                          ),
+                          child: _isSearchingProducts
+                              ? const Padding(
+                                  padding: EdgeInsets.all(12),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.search,
+                                  color: Colors.white,
+                                  size: 24,
+                                ),
                         ),
                       ),
                     ],
                   ),
+                  if (searchQuery.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      constraints: const BoxConstraints(maxHeight: 200),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFDEE3DF)),
+                      ),
+                      child: searchResults.isEmpty
+                          ? const Padding(
+                              padding: EdgeInsets.all(14),
+                              child: Center(
+                                child: Text(
+                                  'Barang tidak ditemukan di database',
+                                  style: TextStyle(
+                                    color: Color(0xFF59615D),
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ),
+                            )
+                          : ListView.separated(
+                              shrinkWrap: true,
+                              itemCount: searchResults.length,
+                              separatorBuilder: (_, _) => const Divider(
+                                height: 1,
+                                color: Color(0xFFDEE3DF),
+                              ),
+                              itemBuilder: (context, index) {
+                                final product = searchResults[index];
+                                return ListTile(
+                                  dense: true,
+                                  title: Text(
+                                    product.namaBarang,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 15,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    '${_formatRupiah(product.hargaJual)} • Stok: ${product.jumlahStok} ${product.satuan}',
+                                    style: const TextStyle(fontSize: 13),
+                                  ),
+                                  trailing: const Icon(
+                                    Icons.add_circle,
+                                    color: Color(0xFF1B5E20),
+                                  ),
+                                  onTap: () => _addProductToCart(product),
+                                );
+                              },
+                            ),
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
